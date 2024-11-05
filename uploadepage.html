@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload PDF, PPTX et DOCX vers Firebase</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.6.10/firebase-app-compat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.6.10/firebase-storage-compat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.6.10/firebase-firestore-compat.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 600px;
+        }
+        input[type="file"] {
+            display: block;
+            margin-bottom: 10px;
+        }
+        select, input[type="number"] {
+            width: calc(100% - 22px);
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button[disabled] {
+            background-color: #9E9E9E;
+            cursor: not-allowed;
+        }
+        button:hover:not([disabled]) {
+            background-color: #45a049;
+        }
+        #progressBarContainer {
+            width: 100%;
+            background-color: #f3f3f3;
+            border-radius: 13px;
+            padding: 3px;
+            margin-top: 10px;
+        }
+        #progressBar {
+            width: 0%;
+            height: 20px;
+            background-color: #4CAF50;
+            border-radius: 10px;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+        }
+        .file-info {
+            margin-top: 20px;
+            display: none;
+        }
+        .file-info p {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Ajoute des cours ici :</h1>
+    <form id="upload-form">
+        <select id="discriptionInput" required>
+            <option value="" disabled selected>Choisir une description</option>
+            <option value="anatomie">Anatomie</option>
+            <option value="histologie">Histologie</option>
+            <option value="embriologie">Embryologie</option>
+            <option value="biochimie">Biochimie</option>
+            <option value="chimie generale">Chimie générale</option>
+            <option value="chimie organique">Chimie organique</option>
+            <option value="biophysique">Biophysique</option>
+            <option value="cytologie">Cytologie</option>
+            <option value="ssh">SSH</option>
+            <option value="physiologie">Physiologie</option>
+            <option value="biostatistique">Biostatistique</option>
+        </select>
+        <input type="file" id="file-input" accept=".pdf, .pptx, .docx" required>
+        <input type="number" id="classificationInput" placeholder="Classification" required>
+        <button type="submit" id="upload-button">Uploader</button>
+    </form>
+    <div id="progressBarContainer">
+        <div id="progressBar"></div>
+    </div>
+    <div id="file-info" class="file-info">
+        <h2>Information du fichier</h2>
+        <p><strong>Nom du fichier :</strong> <span id="fileNameDisplay"></span></p>
+        <p><strong>URL de téléchargement :</strong> <a id="fileDownloadURL" href="#" target="_blank"></a></p>
+    </div>
+    <script>
+        const firebaseConfig = {  
+  apiKey : "AIzaSyAiW8sUrn2QR2l1cPCeJ8bXHXxuBrrGqaU" ,  
+  authDomain : "assist-b4dc3.firebaseapp.com" ,  
+  projectId : "assist-b4dc3" ,  
+  storageBucket : "assist-b4dc3.appspot.com" ,  
+  messagerieSenderId : "136103763960" ,  
+  appId : "1:136103763960:web:0b92c6d26174e76f5d000d" ,  
+  measurementId : "G-MNL9VZ1V5Z"  
+}
+        firebase.initializeApp(firebaseConfig);
+        const storage = firebase.storage();
+        const firestore = firebase.firestore();
+        const uploadButton = document.getElementById('upload-button');
+        const progressBar = document.getElementById('progressBar');
+        const progressBarContainer = document.getElementById('progressBarContainer');
+
+        function updateProgressBar(progress) {
+            progressBar.style.width = `${progress}%`;
+            progressBar.textContent = `${Math.round(progress)}%`;
+        }
+
+        async function convertFile(file, convertUrl) {
+            const formData = new FormData();
+            formData.append('File', file);
+
+            const response = await fetch(convertUrl, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error('Erreur lors de la conversion du fichier');
+            }
+
+            const blob = await response.blob();
+            return new File([blob], file.name.replace(/\.[^/.]+$/, ".pdf"), { type: 'application/pdf' });
+        }
+
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const descriptionContent = document.getElementById('discriptionInput').value;
+            const classificationValue = document.getElementById('classificationInput').value;
+            let file = document.getElementById('file-input').files[0];
+
+            if (!file) {
+                alert('Veuillez sélectionner un fichier PDF, PPTX ou DOCX.');
+                return;
+            }
+
+            if (!descriptionContent) {
+                alert('Veuillez entrer une description.');
+                return;
+            }
+
+            if (!classificationValue) {
+                alert('Veuillez entrer une classification.');
+                return;
+            }
+
+            if (navigator.onLine === false) {
+                alert('Aucune connexion internet détectée. Veuillez vérifier votre connexion et réessayer.');
+                return;
+            }
+
+            try {
+                uploadButton.textContent = 'Uploading...';
+                uploadButton.disabled = true;
+                progressBarContainer.style.display = 'block';
+                updateProgressBar(0);
+
+                if (file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
+                    file = await convertFile(file, 'https://v2.convertapi.com/convert/ppt/to/pdf?Secret=secret_PMQ9FnCci4r5xuxE&download=attachment');
+                } else if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+                    file = await convertFile(file, 'https://v2.convertapi.com/convert/doc/to/pdf?Secret=secret_PMQ9FnCci4r5xuxE&download=attachment');
+                }
+
+                const storageRef = storage.ref('files/' + file.name);
+                const uploadTask = storageRef.put(file);
+
+                uploadTask.on('state_changed', (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    updateProgressBar(progress);
+                }, (error) => {
+                    console.error('Erreur lors de l\'upload:', error);
+                    alert('Une erreur est survenue lors de l\'upload du fichier.');
+                    uploadButton.textContent = 'Uploader';
+                    uploadButton.disabled = false;
+                    progressBarContainer.style.display = 'none';
+                }, async () => {
+                    const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
+                    const fileName = file.name;
+                    await firestore.collection('QuizSet').doc(fileName).set({
+                        pdf_url: downloadURL,
+                        quizName: fileName,
+                        discription: descriptionContent,
+                        ref: '1er',
+                        classifiquation: +classificationValue  // Convertir en nombre
+                    }, { merge: true });
+
+                    document.getElementById('fileNameDisplay').textContent = fileName;
+                    document.getElementById('fileDownloadURL').href = downloadURL;
+                    document.getElementById('fileDownloadURL').textContent = downloadURL;
+                    document.getElementById('file-info').style.display = 'block';
+
+                    uploadButton.textContent = 'Uploader';
+                    uploadButton.disabled = false;
+                    progressBarContainer.style.display = 'none';
+                });
+            } catch (error) {
+                console.error('Erreur lors de l\'upload:', error);
+                alert('Une erreur est survenue. Veuillez réessayer.');
+                uploadButton.textContent = 'Uploader';
+                uploadButton.disabled = false;
+                progressBarContainer.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
